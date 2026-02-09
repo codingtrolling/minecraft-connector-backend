@@ -1,43 +1,80 @@
-const net = require('net');
+const mc = require('minecraft-protocol');
 const WebSocket = require('ws');
+const http = require('http');
 
-// This tool runs on a specific port (e.g., 8080)
-const wss = new WebSocket.Server({ port: 8080 });
+// 1. SETUP SERVER
+const server = http.createServer();
+const wss = new WebSocket.Server({ server });
+const PORT = process.env.PORT || 3000;
 
-console.log("Minecraft Connector Tool: Active on Port 8080");
+console.log(`[Tool 11] MC Proxy Engine starting on port ${PORT}...`);
 
 wss.on('connection', (ws) => {
-    let minecraftServer = null;
+    console.log('[Proxy] Browser connected via WebSocket.');
+    let mcClient = null;
 
     ws.on('message', (message) => {
-        const command = JSON.parse(message);
+        try {
+            const data = JSON.parse(message);
 
-        // ACTION: CONNECT TO A SERVER
-        if (command.type === 'connect') {
-            const [host, port] = command.address.split(':');
-            
-            minecraftServer = new net.Socket();
-            minecraftServer.connect(port || 25565, host, () => {
-                ws.send(JSON.stringify({ type: 'status', msg: 'Connected to MC Server' }));
-            });
+            // 2. ACTION: INITIALIZE CONNECTION
+            if (data.type === 'connect') {
+                const parts = data.address.split(':');
+                const host = parts[0];
+                const port = parts[1] ? parseInt(parts[1]) : 25565;
 
-            // Forward data from MC Server -> Browser
-            minecraftServer.on('data', (data) => {
-                ws.send(data); // Sending raw buffer to browser
-            });
+                console.log(`[Proxy] Creating tunnel to: ${host}:${port}`);
 
-            minecraftServer.on('error', (err) => {
-                ws.send(JSON.stringify({ type: 'error', msg: err.message }));
-            });
-        }
+                // Create the Minecraft Client
+                mcClient = mc.createClient({
+                    host: host,
+                    port: port,
+                    username: data.username || 'TrollGuest',
+                    version: data.version || false // false auto-detects version
+                });
 
-        // ACTION: FORWARD PLAYER DATA (Browser -> MC Server)
-        if (command.type === 'packet' && minecraftServer) {
-            minecraftServer.write(Buffer.from(command.data));
+                // 3. FORWARD PACKETS: MC -> BROWSER
+                mcClient.on('packet', (packet, meta) => {
+                    ws.send(JSON.stringify({
+                        type: 'mc_packet',
+                        meta: meta,
+                        data: packet
+                    }));
+                });
+
+                // 4. HANDLE STATUS & ERRORS
+                mcClient.on('connect', () => {
+                    ws.send(JSON.stringify({ type: 'status', msg: `Successfully Tunneled to ${host}` }));
+                });
+
+                mcClient.on('error', (err) => {
+                    console.error('[MC Error]', err);
+                    ws.send(JSON.stringify({ type: 'error', msg: err.message }));
+                });
+
+                mcClient.on('end', () => {
+                    ws.send(JSON.stringify({ type: 'status', msg: 'Minecraft Server closed the connection.' }));
+                });
+            }
+
+            // 5. ACTION: SEND PACKET (BROWSER -> MC)
+            if (data.type === 'send_packet' && mcClient) {
+                mcClient.write(data.packetName, data.packetPayload);
+            }
+
+        } catch (e) {
+            console.error('[System Error] Invalid JSON received');
         }
     });
 
     ws.on('close', () => {
-        if (minecraftServer) minecraftServer.destroy();
+        console.log('[Proxy] Browser disconnected.');
+        if (mcClient) mcClient.end();
     });
+});
+
+
+
+server.listen(PORT, () => {
+    console.log(`[Tool 11] Fully Functional. Access via wss://your-url.up.railway.app`);
 });
