@@ -1,0 +1,16 @@
+{
+  "name": "mc-server-connector",
+  "version": "1.1.0",
+  "description": "Tool 11: WebSocket to TCP Minecraft Bridge",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "minecraft-protocol": "^1.47.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
